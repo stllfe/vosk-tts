@@ -60,8 +60,8 @@ class TextAudioLoader(torch.utils.data.Dataset):
 
         audiopaths_and_text_new = []
         lengths = []
-        for audiopath, text in self.audiopaths_and_text:
-            audiopath = "db/irina/wavs/" + audiopath + ".wav"
+        for audiopath, _, text, _ in self.audiopaths_and_text:
+            # audiopath = "db/irina/wavs/" + audiopath + ".wav"
             if self.min_text_len <= len(text) and len(text) <= self.max_text_len:
                 audiopaths_and_text_new.append([audiopath, text])
                 lengths.append(os.path.getsize(audiopath) // (2 * self.hop_length))
@@ -132,9 +132,6 @@ class TextAudioLoader(torch.utils.data.Dataset):
         elif self.cleaned_text:
             text_norm = cleaned_text_to_sequence(text)
         elif self.charbert:
-            import code
-
-            code.interact(local=locals() | globals())
             text_norm = text_to_sequence_charbert(text)
         else:
             text_norm = text_to_sequence(text, self.text_cleaners)

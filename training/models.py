@@ -386,43 +386,36 @@ class CharBertTextEncoder(nn.Module):
         self,
         n_vocab,
         out_channels,
-        hidden_channels,
-        filter_channels,
-        n_heads,
-        n_layers,
-        kernel_size,
-        p_dropout,
-        gin_channels=0,
+        **kwargs,
     ):
         super().__init__()
+        from .text.charbert import MODEL_NAME
+
         self.n_vocab = n_vocab
         self.out_channels = out_channels
-        self.hidden_channels = hidden_channels
-        self.filter_channels = filter_channels
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.kernel_size = kernel_size
-        self.p_dropout = p_dropout
-        self.gin_channels = gin_channels
-        self.emb = nn.Embedding(n_vocab, hidden_channels)
-        nn.init.normal_(self.emb.weight, 0.0, hidden_channels**-0.5)
 
-        self.encoder = AutoModel.from_pretrained("ruaccent/RUAccent-encoder")
-        # import code
-
-        # code.interact(local=locals() | globals())
-        self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
+        self.encoder = AutoModel.from_pretrained(MODEL_NAME)
+        self.proj = nn.Conv1d(self.encoder.config.hidden_size, out_channels * 2, 1)
 
     def forward(self, x, x_lengths, g=None):
-        x = self.emb(x) * math.sqrt(self.hidden_channels)  # [b, t, h]
+        max_length = x.size(1)
+        seq_range = torch.arange(max_length, device=x.device)
+        seq_range_expand = seq_range.unsqueeze(0).expand(x.size(0), max_length)
+        padding_mask = seq_range_expand >= x_lengths.unsqueeze(1)
+        attention_mask = torch.ones_like(x)
+        attention_mask[padding_mask] = 0
+        # attention_mask = attention_mask.unsqueeze(1)
+        x = self.encoder(
+            x,
+            attention_mask,
+        )  # FIXME: won't work for multispeaker for now, need to pass g for conditioning
+        x = x.last_hidden_state
         x = torch.transpose(x, 1, -1)  # [b, h, t]
+        # TODO: we already computed it basically
         x_mask = torch.unsqueeze(commons.sequence_mask(x_lengths, x.size(2)), 1).to(
             x.dtype
         )
-
-        x = self.encoder(x * x_mask, x_mask, g=g)
         stats = self.proj(x) * x_mask
-
         m, logs = torch.split(stats, self.out_channels, dim=1)
         return x, m, logs, x_mask
 
@@ -1970,26 +1963,26 @@ class SynthesizerTrn(nn.Module):
 
         if not self.use_charbert:
             self.enc_p = TextEncoder(
-                n_vocab,
-                inter_channels,
-                hidden_channels,
-                filter_channels,
-                n_heads,
-                n_layers,
-                kernel_size,
-                p_dropout,
+                n_vocab=n_vocab,
+                out_channels=inter_channels,
+                hidden_channels=hidden_channels,
+                filter_channels=filter_channels,
+                n_heads=n_heads,
+                n_layers=n_layers,
+                kernel_size=kernel_size,
+                p_dropout=p_dropout,
                 gin_channels=self.enc_gin_channels,
             )
         else:
             self.enc_p = CharBertTextEncoder(
-                n_vocab,
-                inter_channels,
-                hidden_channels,
-                filter_channels,
-                n_heads,
-                n_layers,
-                kernel_size,
-                p_dropout,
+                n_vocab=n_vocab,
+                out_channels=inter_channels,
+                hidden_channels=hidden_channels,
+                filter_channels=filter_channels,
+                n_heads=n_heads,
+                n_layers=n_layers,
+                kernel_size=kernel_size,
+                p_dropout=p_dropout,
                 gin_channels=self.enc_gin_channels,
             )
 
@@ -2088,7 +2081,7 @@ class SynthesizerTrn(nn.Module):
 
     def forward(self, x, x_lengths, y, y_lengths, sid=None):
         # x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
-        if self.n_speakers > 0:
+        if self.n_speakers > 1:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = None
