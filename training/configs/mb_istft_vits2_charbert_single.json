@@ -34,7 +34,7 @@
       "mel_fmin": 0.0,
       "mel_fmax": null,
       "add_blank": true,
-      "n_speakers": 1,
+      "n_speakers": 0,
       "cleaned_text": false,
       "g2p_text": false,
       "aligned_text": false,
@@ -71,7 +71,6 @@
       "use_spectral_norm": false,
       "use_sdp": true,
       "use_charbert": true,
-      "gin_channels": 256,
       "use_wd": false
     }
 }

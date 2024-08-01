@@ -58,9 +58,9 @@ def text_to_sequence_g2p(text):
 
 
 def text_to_sequence_charbert(text):
-    from .charbert import tokenizer
+    from .charbert import tokenizer, SOS_TOKEN, EOS_TOKEN
 
-    sequence = tokenizer.encode(text)
+    sequence = tokenizer.encode(SOS_TOKEN + text + EOS_TOKEN)
     return sequence
 
 

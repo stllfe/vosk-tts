@@ -10,7 +10,8 @@ import tqdm
 import utils
 from data_utils import (
     DistributedBucketSampler,
-    TextAudioSpeakerCollate,
+    TextAudioCollate,
+    TextAudioLoader,
     TextAudioSpeakerLoader,
 )
 from losses import (
@@ -54,6 +55,8 @@ def main():
     os.environ["MASTER_PORT"] = "6060"
 
     hps = utils.get_hparams()
+    if n_gpus == 1:
+        return run(0, n_gpus, hps)
     mp.spawn(
         run,
         nprocs=n_gpus,
@@ -106,7 +109,7 @@ def run(rank, n_gpus, hps):
         rank=rank,
         shuffle=True,
     )
-    collate_fn = TextAudioSpeakerCollate()
+    collate_fn = TextAudioCollate()
     train_loader = DataLoader(
         train_dataset,
         num_workers=8,
@@ -116,7 +119,7 @@ def run(rank, n_gpus, hps):
         batch_sampler=train_sampler,
     )
     if rank == 0:
-        eval_dataset = TextAudioSpeakerLoader(hps.data.validation_files, hps.data)
+        eval_dataset = TextAudioLoader(hps.data.validation_files, hps.data)
         eval_loader = DataLoader(
             eval_dataset,
             num_workers=1,
@@ -233,8 +236,17 @@ def run(rank, n_gpus, hps):
         net_wd = None
         wl = None
 
+    n_vocab = len(symbols)
+    charbert = False
+    if "use_charbert" in hps.model.keys() and hps.model.use_charbert:
+        from training.text.charbert import tokenizer
+
+        n_vocab = tokenizer.vocab_size
+        charbert = True
+        print("Using character BERT text encoder")
+
     net_g = SynthesizerTrn(
-        len(symbols),
+        n_vocab,
         posterior_channels,
         hps.train.segment_size // hps.data.hop_length,
         n_speakers=hps.data.n_speakers,
@@ -277,6 +289,10 @@ def run(rank, n_gpus, hps):
     else:
         optim_wd = None
 
+    if charbert:
+        for param in net_g.enc_p.encoder.parameters():
+            param.requires_grad = False
+        print("Freezed BERT text encoder! Only projection will train...")
     #    for param in net_d.parameters():
     #        param.requires_grad = False
     #    for param in net_g.parameters():
@@ -415,7 +431,6 @@ def train_and_evaluate(
         spec_lengths,
         y,
         y_lengths,
-        speakers,
     ) in enumerate(loader):
         if net_g.use_noise_scaled_mas:
             current_mas_noise_scale = (
@@ -434,7 +449,6 @@ def train_and_evaluate(
             y.cuda(rank, non_blocking=True),
             y_lengths.cuda(rank, non_blocking=True),
         )
-        speakers = speakers.cuda(rank, non_blocking=True)
 
         with autocast(enabled=hps.train.fp16_run):
             (
@@ -447,7 +461,7 @@ def train_and_evaluate(
                 z_mask,
                 (z, z_p, m_p, logs_p, m_q, logs_q),
                 (hidden_x, logw, logw_),
-            ) = net_g(x, x_lengths, spec, spec_lengths, speakers)
+            ) = net_g(x, x_lengths, spec, spec_lengths)
 
             if (
                 hps.model.use_mel_posterior_encoder
@@ -743,12 +757,10 @@ def evaluate(hps, generator, eval_loader, writer_eval):
             spec_lengths,
             y,
             y_lengths,
-            speakers,
         ) in enumerate(eval_loader):
             x, x_lengths = x.cuda(0), x_lengths.cuda(0)
             spec, spec_lengths = spec.cuda(0), spec_lengths.cuda(0)
             y, y_lengths = y.cuda(0), y_lengths.cuda(0)
-            speakers = speakers.cuda(0)
 
             # remove else
             x = x[:1]

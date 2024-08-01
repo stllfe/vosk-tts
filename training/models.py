@@ -389,7 +389,7 @@ class CharBertTextEncoder(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        from .text.charbert import MODEL_NAME
+        from training.text.charbert import MODEL_NAME
 
         self.n_vocab = n_vocab
         self.out_channels = out_channels
